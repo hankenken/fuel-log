@@ -5,6 +5,35 @@ function review(rows){draft=rows.map(clean);$('review').hidden=false;$('forms').
 const run=fn=>async(...a)=>{try{await fn(...a)}catch(e){status(e.message)}};$('parse').onclick=run(()=>parse($('payload').value));$('manual').onclick=()=>review([{}]);$('save').onclick=run(async()=>{document.querySelectorAll('[data-i]').forEach(e=>draft[+e.dataset.i][e.dataset.k]=e.value);await store(draft.map(clean));$('review').hidden=true;});$('history').onclick=run(async e=>{const id=e.target.dataset.edit||e.target.dataset.del;if(!id)return;if(e.target.dataset.edit)review([records.find(r=>r.id===id)]);else if(confirm('削除しますか？')){await tx('readwrite',s=>s.delete(id));await load();}});$('month').onchange=render;$('filter').onchange=render;$('sample').onclick=()=>status('既存データは付属JSONをファイル取り込みしてください。');function download(content,name,type){const a=document.createElement('a');const u=URL.createObjectURL(new Blob([content],{type}));a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);} $('backup').onclick=()=>download(JSON.stringify(records,null,2),'fuel-backup.json','application/json');const headings=fields.map(f=>f[1]).concat(['燃費 km/L','走行コスト 円/km']);const matrix=()=>[headings,...records.map(r=>fields.map(([k])=>r[k]??'').concat(calc(r)?[r.trip/r.liters,r.total/r.trip]:['','']))];$('csv').onclick=()=>download('\ufeff'+matrix().map(row=>row.map(v=>'"'+String(v).replace(/^[=+@-]/,"'$&").replace(/"/g,'""')+'"').join(',')).join('\r\n'),'fuel.csv','text/csv');async function sheet(){if(window.XLSX)return;await new Promise((ok,no)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';s.onload=ok;s.onerror=()=>no(Error('Excelライブラリを取得できません'));document.head.append(s)});} $('xlsx').onclick=run(async()=>{await sheet();const w=XLSX.utils.book_new();XLSX.utils.book_append_sheet(w,XLSX.utils.aoa_to_sheet(matrix()),'購入履歴');XLSX.writeFile(w,'fuel.xlsx')});$('file').onchange=run(async e=>{const f=e.target.files[0];if(!f)return;if(f.name.endsWith('.json'))parse(await f.text());else{await sheet();const w=XLSX.read(await f.arrayBuffer(),{type:'array',cellDates:true});const a=XLSX.utils.sheet_to_json(w.Sheets[w.SheetNames[0]],{header:1,defval:null});const n=a.findIndex(r=>r[0]==='購入日');if(n<0)throw Error('購入日ヘッダーが見つかりません');review(a.slice(n+1).filter(r=>r[0]).map(r=>{const o={};fields.forEach(([k],i)=>o[k]=r[i]);if(a[n].length===20&&String(a[n][17]).includes('燃費'))o.notes=r[19];if(o.date instanceof Date)o.date=o.date.toISOString().slice(0,10);return o;}));}e.target.value='';});$('prompt').onclick=run(async()=>{const base=location.href.split(/[?#]/)[0];const p=`レシート写真を解析してください。1枚につき1オブジェクト、配列JSONで出力。キー: ${fields.map(f=>f[0]).join(', ')}。dateはYYYY-MM-DD、timeはHH:mm、数値は数値型、不明はnull。走行距離や満タンは推測しない。カード番号や会員番号は含めない。金額と数量を原本照合。JSONのほかに ${base}#import= にJSON配列をencodeURIComponentした文字列を連結したMarkdownリンクを出力。リンクが長い場合はJSONのみ。`;await navigator.clipboard.writeText(p);status('指示をコピーしました。ChatGPTへ写真と一緒に送信してください。');});function consumeImport(){const p=new URLSearchParams(location.hash.slice(1)).get('import');if(p){parse(p);history.replaceState(null,'',location.pathname+location.search);}} 
 if($('chatLaunch')){const setting='fuel-log-chat-url';const good=v=>/^https:\/\/chatgpt\.com\/c\/[a-zA-Z0-9-]+\/?$/.test(v);let saved=localStorage.getItem(setting)||'';$('chatUrl').value=saved;const apply=()=>{$('chatLaunch').href=good(saved)?saved:'https://chatgpt.com/'};apply();$('chatSave').onclick=run(()=>{const v=$('chatUrl').value.trim();if(!good(v))throw Error('https://chatgpt.com/c/ 形式のURLを入力してください');localStorage.setItem(setting,v);saved=v;apply();status('専用チャットURLを保存しました。');});$('chatLaunch').onclick=e=>{if(!good(saved)){e.preventDefault();$('chatUrl').closest('details').open=true;$('chatUrl').focus();status('最初に専用チャットURLを登録してください。');}};}
 window.addEventListener('hashchange',run(()=>{if(db)consumeImport();}));
-const q=indexedDB.open('fuel-log-v02',1);q.onupgradeneeded=()=>q.result.createObjectStore('fuel',{keyPath:'id'});q.onsuccess=run(async()=>{db=q.result;await load();consumeImport();});q.onerror=()=>status('データベースを開けません');if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+const q=indexedDB.open('fuel-log-v02',1);q.onupgradeneeded=()=>q.result.createObjectStore('fuel',{keyPath:'id'});q.onsuccess=run(async()=>{db=q.result;await load();consumeImport();});q.onerror=()=>status('データベースを開けません');
 
 if($('paste')) $('paste').onclick=run(async()=>{const fallback=()=>{$('importDetails').open=true;$('payload').focus();status('JSONを入力欄に手動で貼り付け、取り込み・確認を押してください。');};let s;try{if(!navigator.clipboard?.readText){fallback();return;}s=await navigator.clipboard.readText();}catch(e){fallback();return;}if(!s.trim()){fallback();return;}$('payload').value=s;try{parse(s);status('読み込み完了。内容を確認して保存してください。');}catch(e){$('importDetails').open=true;status(e.message+'。JSONを確認してください。');}});
+
+if($('updateStatus')){
+const current=$('currentVersion').textContent.trim(), msg=s=>$('updateStatus').textContent=s;
+let registration=null, checking=false;
+async function checkVersion(){
+if(checking)return;checking=true;
+try{
+if('serviceWorker' in navigator){registration=registration||await navigator.serviceWorker.register('sw.js',{updateViaCache:'none'});await registration.update().catch(()=>{});}
+const response=await fetch('index.html?versionCheck='+Date.now(),{cache:'no-store'});
+if(!response.ok)throw Error('HTTP '+response.status);
+const doc=new DOMParser().parseFromString(await response.text(),'text/html');
+const latest=doc.querySelector('#currentVersion')?.textContent.trim();
+if(!latest||!/^\d+\.\d+\.\d+$/.test(latest))throw Error('バージョン取得失敗');
+msg('現在: '+current+' / 最新: '+latest+(latest!==current?' — 新しいバージョンがあります。':' — 最新版です。'));
+}catch(e){msg('現在: '+current+' / 最新版を確認できません。通信状態を確認してください。');}finally{checking=false;}
+}
+$('checkUpdate').onclick=checkVersion;
+$('applyUpdate').onclick=async()=>{
+if(!confirm('未保存の入力内容は失われます。購入履歴・設定を保持してアプリを更新しますか？'))return;
+try{
+msg('更新中…');
+const u=new URL(location.href);u.searchParams.set('refresh',Date.now());
+if('serviceWorker' in navigator){registration=registration||await navigator.serviceWorker.getRegistration();if(registration)await registration.update();}
+location.replace(u.href);
+}catch(e){msg('更新に失敗しました。通信状態を確認して再試行してください。');}
+};
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkVersion();});
+checkVersion();
+}
